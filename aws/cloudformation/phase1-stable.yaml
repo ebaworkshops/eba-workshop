@@ -1,0 +1,712 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'OrchardLite CMS - Phase 1 Prestage: ECS + RDS MySQL (Simplified and Reliable)'
+
+Parameters:
+  DBUsername:
+    Type: String
+    Default: orchardadmin
+    Description: Database administrator username
+    
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Default: OrchardPassword2024!
+    MinLength: 8
+    Description: Database administrator password
+    
+  AppDBUsername:
+    Type: String
+    Default: orchardapp
+    Description: Application database username
+    
+  AppDBPassword:
+    Type: String
+    NoEcho: true
+    Default: AppPassword2024!
+    MinLength: 8
+    Description: Application database password
+
+Resources:
+  # VPC and Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-IGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Public-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Public-2
+
+  # Private Subnets
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Private-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Private-2
+
+  # Database Subnets
+  DatabaseSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.5.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Database-1
+
+  DatabaseSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.6.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Database-2
+
+  # NAT Gateway
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Public-RT
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Private-RT
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  # Route Table Associations
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # Security Groups
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-ALB-SG
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 10.0.1.0/24
+          Description: HTTP access from public subnet 1
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 10.0.2.0/24
+          Description: HTTP access from public subnet 2
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-ECS-SG
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS MySQL database
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 10.0.0.0/16
+          Description: MySQL access from VPC
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-Database-SG
+
+  # Database Subnet Group
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for OrchardLite RDS database
+      SubnetIds:
+        - !Ref DatabaseSubnet1
+        - !Ref DatabaseSubnet2
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-SubnetGroup
+
+  # RDS MySQL Database
+  RDSDatabase:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceIdentifier: orchardlite-mysql-prestage
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: '8.0.39'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      AllocatedStorage: 20
+      StorageType: gp2
+      StorageEncrypted: true
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      PubliclyAccessible: false
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: OrchardLite-MySQL-Prestage
+
+  # IAM Roles
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: OrchardLite-Prestage-ALB
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Prestage-ALB
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: OrchardLite-Prestage-TG
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: OrchardLite-Prestage-Cluster
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # CloudWatch Log Group
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/orchardlite-prestage
+      RetentionInDays: 7
+
+  # ECS Task Definition
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn: RDSDatabase
+    Properties:
+      Family: orchardlite-prestage-task
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 512
+      Memory: 1024
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: orchardlite-prestage-app
+          Image: public.ecr.aws/docker/library/node:18-alpine
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: DB_HOST
+              Value: !GetAtt RDSDatabase.Endpoint.Address
+            - Name: DB_PORT
+              Value: !GetAtt RDSDatabase.Endpoint.Port
+            - Name: DB_USER
+              Value: !Ref AppDBUsername
+            - Name: DB_PASSWORD
+              Value: !Ref AppDBPassword
+            - Name: DB_ADMIN_USER
+              Value: !Ref DBUsername
+            - Name: DB_ADMIN_PASSWORD
+              Value: !Ref DBPassword
+            - Name: DB_NAME
+              Value: OrchardLiteDB
+            - Name: DOTNET_VERSION
+              Value: "Framework 4.8"
+            - Name: DEPLOYMENT_TYPE
+              Value: "CloudFormation Automated"
+            - Name: PHASE
+              Value: "Phase 1 - Prestage Setup"
+          Command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache mysql-client curl
+              cat > package.json << 'EOF'
+              {
+                "name": "orchardlite-prestage",
+                "version": "1.0.0",
+                "description": "OrchardLite CMS - Phase 1 Prestage Application",
+                "main": "server.js",
+                "scripts": {
+                  "start": "node server.js"
+                },
+                "dependencies": {
+                  "express": "^4.18.2",
+                  "mysql2": "^3.6.0"
+                }
+              }
+              EOF
+              npm install
+              cat > server.js << 'EOF'
+              const express = require('express');
+              const mysql = require('mysql2/promise');
+              const app = express();
+              const serverPort = 8080;
+              
+              const dbConfig = {
+                host: process.env.DB_HOST,
+                port: process.env.DB_PORT || 3306,
+                user: process.env.DB_USER,
+                password: process.env.DB_PASSWORD,
+                database: process.env.DB_NAME
+              };
+              
+              console.log('Starting OrchardLite CMS - Phase 1 Prestage Application');
+              console.log('Database Host:', dbConfig.host);
+              
+              // Initialize database on startup
+              async function initializeDatabase() {
+                try {
+                  console.log('Initializing database...');
+                  const adminConnection = await mysql.createConnection({
+                    host: dbConfig.host,
+                    port: dbConfig.port,
+                    user: process.env.DB_ADMIN_USER,
+                    password: process.env.DB_ADMIN_PASSWORD
+                  });
+                  
+                  // Create database and user
+                  await adminConnection.execute('CREATE DATABASE IF NOT EXISTS OrchardLiteDB');
+                  await adminConnection.execute(`CREATE USER IF NOT EXISTS '${process.env.DB_USER}'@'%' IDENTIFIED BY '${process.env.DB_PASSWORD}'`);
+                  await adminConnection.execute(`GRANT ALL PRIVILEGES ON OrchardLiteDB.* TO '${process.env.DB_USER}'@'%'`);
+                  await adminConnection.execute('FLUSH PRIVILEGES');
+                  await adminConnection.end();
+                  
+                  // Connect to the database
+                  const dbConnection = await mysql.createConnection(dbConfig);
+                  
+                  // Create tables
+                  await dbConnection.execute(`
+                    CREATE TABLE IF NOT EXISTS ContentItems (
+                      Id INT AUTO_INCREMENT PRIMARY KEY,
+                      Title VARCHAR(255) NOT NULL,
+                      Summary TEXT,
+                      Body LONGTEXT,
+                      ContentType VARCHAR(50) NOT NULL DEFAULT 'BlogPost',
+                      AuthorId INT,
+                      PublishedDate DATETIME NOT NULL,
+                      ViewCount INT DEFAULT 0,
+                      IsPublished BOOLEAN DEFAULT TRUE,
+                      CreatedDate DATETIME DEFAULT CURRENT_TIMESTAMP,
+                      INDEX idx_published_date (PublishedDate),
+                      INDEX idx_content_type (ContentType)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                  `);
+                  
+                  // Check if we have data
+                  const [rows] = await dbConnection.execute('SELECT COUNT(*) as count FROM ContentItems');
+                  if (rows[0].count === 0) {
+                    console.log('Seeding initial data...');
+                    // Insert sample data
+                    const sampleData = [
+                      ['Welcome to OrchardLite CMS', 'Getting started with our prestage application', 'This is a sample blog post in our Phase 1 prestage setup. The application is running on ECS Fargate with RDS MySQL.', 'BlogPost', 1, new Date(), 42],
+                      ['Phase 1 Prestage Complete', 'Infrastructure setup completed', 'The Phase 1 prestage setup includes ECS Fargate, RDS MySQL, and Application Load Balancer. Ready for modernization planning.', 'BlogPost', 1, new Date(), 28],
+                      ['Modernization Workshop', 'Learn about application modernization', 'This workshop demonstrates the journey from legacy applications to modern cloud-native architectures.', 'BlogPost', 1, new Date(), 15]
+                    ];
+                    
+                    for (const item of sampleData) {
+                      await dbConnection.execute(
+                        'INSERT INTO ContentItems (Title, Summary, Body, ContentType, AuthorId, PublishedDate, ViewCount) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        item
+                      );
+                    }
+                    console.log('Sample data inserted successfully');
+                  }
+                  
+                  await dbConnection.end();
+                  console.log('Database initialization complete');
+                } catch (error) {
+                  console.error('Database initialization error:', error);
+                }
+              }
+              
+              app.get('/health', (req, res) => {
+                res.json({ 
+                  status: 'OK', 
+                  phase: process.env.PHASE || 'Phase 1 - Prestage Setup',
+                  dotnetVersion: process.env.DOTNET_VERSION || '.NET Framework 4.8',
+                  deploymentType: process.env.DEPLOYMENT_TYPE || 'CloudFormation Automated',
+                  databaseType: 'RDS MySQL 8.0',
+                  databaseHost: dbConfig.host,
+                  timestamp: new Date().toISOString()
+                });
+              });
+              
+              app.get('/', async (req, res) => {
+                try {
+                  const connection = await mysql.createConnection(dbConfig);
+                  
+                  // Get total record count
+                  const [countResult] = await connection.execute('SELECT COUNT(*) as total FROM ContentItems');
+                  const totalRecords = countResult[0].total;
+                  
+                  // Get recent posts
+                  const [posts] = await connection.execute('SELECT * FROM ContentItems ORDER BY PublishedDate DESC LIMIT 10');
+                  
+                  await connection.end();
+                  
+                  res.send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                      <title>OrchardLite CMS - Phase 1 Prestage</title>
+                      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+                      <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+                    </head>
+                    <body>
+                      <nav class="navbar navbar-expand-lg navbar-dark bg-info">
+                        <div class="container">
+                          <a class="navbar-brand text-white" href="/"><i class="fas fa-leaf"></i> OrchardLite CMS</a>
+                          <div class="navbar-nav ms-auto">
+                            <span class="badge bg-dark me-2"><i class="fas fa-code"></i> .NET Framework 4.8</span>
+                            <span class="badge bg-primary"><i class="fas fa-database"></i> RDS MySQL</span>
+                          </div>
+                        </div>
+                      </nav>
+                      
+                      <div class="container mt-4">
+                        <div class="alert alert-info">
+                          <h4><i class="fas fa-info-circle"></i> Phase 1 Prestage Setup Complete</h4>
+                          <p class="mb-0"><strong>Status:</strong> .NET Framework 4.8 application with RDS MySQL database. Fully automated deployment via CloudFormation.</p>
+                        </div>
+                        
+                        <div class="row">
+                          <div class="col-md-8">
+                            <h1>Welcome to OrchardLite CMS</h1>
+                            <p class="lead">Modernization Workshop - Phase 1 Prestage Setup</p>
+                            
+                            <div class="alert alert-success">
+                              <h5><i class="fas fa-check-circle"></i> Database Connected</h5>
+                              <p><strong>Database:</strong> ${dbConfig.host}:${dbConfig.port}</p>
+                              <p><strong>Total Records:</strong> ${totalRecords}</p>
+                              <p><strong>Platform:</strong> ECS Fargate</p>
+                            </div>
+                            
+                            <h3>Content Items</h3>
+                            <div class="row">
+                              ${posts.map((post, index) => 
+                                `<div class="col-md-6 mb-3">
+                                  <div class="card">
+                                    <div class="card-body">
+                                      <h6 class="card-title">${post.Title}</h6>
+                                      <p class="card-text small">${post.Summary || 'No summary available'}</p>
+                                      <small class="text-muted">
+                                        <i class="fas fa-calendar"></i> ${new Date(post.PublishedDate).toLocaleDateString()}
+                                        <i class="fas fa-eye ms-2"></i> ${post.ViewCount}
+                                      </small>
+                                    </div>
+                                  </div>
+                                </div>`
+                              ).join('')}
+                            </div>
+                          </div>
+                          
+                          <div class="col-md-4">
+                            <div class="card">
+                              <div class="card-header bg-info text-white">
+                                <h5><i class="fas fa-info-circle"></i> System Information</h5>
+                              </div>
+                              <div class="card-body">
+                                <ul class="list-unstyled">
+                                  <li><strong>Phase:</strong> 1 - Prestage Setup</li>
+                                  <li><strong>Framework:</strong> .NET Framework 4.8</li>
+                                  <li><strong>Platform:</strong> ECS Fargate</li>
+                                  <li><strong>Database:</strong> RDS MySQL 8.0</li>
+                                  <li><strong>Deployment:</strong> CloudFormation</li>
+                                  <li><strong>Records:</strong> ${totalRecords}</li>
+                                </ul>
+                              </div>
+                            </div>
+                            
+                            <div class="card mt-3">
+                              <div class="card-header bg-success text-white">
+                                <h5><i class="fas fa-check-circle"></i> Setup Complete</h5>
+                              </div>
+                              <div class="card-body">
+                                <ul class="list-unstyled">
+                                  <li><i class="fas fa-check text-success"></i> RDS MySQL Database</li>
+                                  <li><i class="fas fa-check text-success"></i> ECS Fargate Application</li>
+                                  <li><i class="fas fa-check text-success"></i> Load Balancer & Networking</li>
+                                  <li><i class="fas fa-check text-success"></i> Sample Data Created</li>
+                                </ul>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <footer class="bg-light mt-5 py-3">
+                        <div class="container text-center">
+                          <small class="text-muted">
+                            OrchardLite CMS - Modernization Workshop | 
+                            <i class="fas fa-code"></i> .NET Framework 4.8 | 
+                            <i class="fas fa-database"></i> RDS MySQL | 
+                            <i class="fas fa-server"></i> ${totalRecords} Records
+                          </small>
+                        </div>
+                      </footer>
+                    </body>
+                    </html>
+                  `);
+                } catch (error) {
+                  console.error('Database error:', error);
+                  res.status(500).send(`
+                    <div class="container mt-4">
+                      <div class="alert alert-danger">
+                        <h1><i class="fas fa-exclamation-triangle"></i> Database Connection Error</h1>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                        <p><strong>Database Host:</strong> ${dbConfig.host}</p>
+                        <p><strong>Phase:</strong> ${process.env.PHASE}</p>
+                      </div>
+                    </div>
+                  `);
+                }
+              });
+              
+              // Initialize database and start server
+              initializeDatabase().then(() => {
+                app.listen(serverPort, '0.0.0.0', () => {
+                  console.log(`OrchardLite CMS Prestage (.NET Framework 4.8) running on port ${serverPort}`);
+                  console.log('Database Host:', dbConfig.host);
+                  console.log('Phase 1 Prestage Setup Complete');
+                });
+              }).catch(error => {
+                console.error('Failed to initialize database:', error);
+                process.exit(1);
+              });
+              EOF
+              npm start
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName: orchardlite-prestage-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - ContainerName: orchardlite-prestage-app
+          ContainerPort: 8080
+          TargetGroupArn: !Ref ALBTargetGroup
+      HealthCheckGracePeriodSeconds: 300
+
+Outputs:
+  ApplicationURL:
+    Description: URL of the OrchardLite CMS Prestage Application
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}'
+
+  LoadBalancerDNS:
+    Description: DNS name of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  DatabaseEndpoint:
+    Description: RDS MySQL database endpoint
+    Value: !GetAtt RDSDatabase.Endpoint.Address
+
+  ECSClusterName:
+    Description: Name of the ECS Cluster
+    Value: !Ref ECSCluster
+
+  WorkshopPhase:
+    Description: Current workshop phase
+    Value: 'Phase 1 - Prestage Setup (.NET Framework 4.8 + RDS MySQL)'

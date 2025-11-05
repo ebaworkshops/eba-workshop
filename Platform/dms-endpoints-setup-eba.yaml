@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Platform Module - DMS Endpoints Setup for OrchardLite CMS Database Migration"
+
+Parameters:
+  # RDS Source Database Parameters
+  RDSEndpoint:
+    Type: String
+    Description: RDS MySQL Source Database Endpoint
+    Default: "orchardlite-mysql-enterprise.xxxxxxxxx.us-west-1.rds.amazonaws.com"
+
+  RDSPort:
+    Type: Number
+    Description: RDS MySQL Source Database Port
+    Default: 3306
+
+  RDSUsername:
+    Type: String
+    Description: RDS MySQL Source Database Username
+    Default: orchardadmin
+
+  RDSPassword:
+    Type: String
+    Description: RDS MySQL Source Database Password
+    NoEcho: true
+    Default: OrchardPassword2024!
+
+  RDSDatabaseName:
+    Type: String
+    Description: RDS MySQL Source Database Name
+    Default: OrchardLiteDB
+
+  # Aurora Target Database Parameters
+  AuroraEndpoint:
+    Type: String
+    Description: Aurora Serverless Target Database Endpoint
+    Default: "orchardlite-aurora-serverless.cluster-xxxxxxxxx.us-west-1.rds.amazonaws.com"
+
+  AuroraPort:
+    Type: Number
+    Description: Aurora Serverless Target Database Port
+    Default: 3306
+
+  AuroraUsername:
+    Type: String
+    Description: Aurora Serverless Target Database Username
+    Default: auroraadmin
+
+  AuroraPassword:
+    Type: String
+    Description: Aurora Serverless Target Database Password
+    NoEcho: true
+    Default: AuroraPassword2024!
+
+  AuroraDatabaseName:
+    Type: String
+    Description: Aurora Serverless Target Database Name
+    Default: OrchardLiteDB
+
+Resources:
+  # ============================================================================
+  # DMS SOURCE ENDPOINT (RDS MySQL)
+  # ============================================================================
+
+  DMSSourceEndpoint:
+    Type: AWS::DMS::Endpoint
+    Properties:
+      EndpointIdentifier: orchardlite-source-rds-endpoint
+      EndpointType: source
+      EngineName: mysql
+      ServerName: !Ref RDSEndpoint
+      Port: !Ref RDSPort
+      Username: !Ref RDSUsername
+      Password: !Ref RDSPassword
+      DatabaseName: !Ref RDSDatabaseName
+      SslMode: none
+      ExtraConnectionAttributes: "initstmt=SET foreign_key_checks=0"
+      MySqlSettings:
+        AfterConnectScript: "SET foreign_key_checks=0;"
+        CleanSourceMetadataOnMismatch: true
+        EventsPollInterval: 10
+        MaxFileSize: 512
+        ParallelLoadThreads: 1
+        ServerTimezone: "UTC"
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Source-RDS-Endpoint
+        - Key: Module
+          Value: Platform
+        - Key: Purpose
+          Value: Migration-Source
+
+  # ============================================================================
+  # DMS TARGET ENDPOINT (Aurora Serverless)
+  # ============================================================================
+
+  DMSTargetEndpoint:
+    Type: AWS::DMS::Endpoint
+    Properties:
+      EndpointIdentifier: orchardlite-target-aurora-endpoint
+      EndpointType: target
+      EngineName: mysql
+      ServerName: !Ref AuroraEndpoint
+      Port: !Ref AuroraPort
+      Username: !Ref AuroraUsername
+      Password: !Ref AuroraPassword
+      DatabaseName: !Ref AuroraDatabaseName
+      SslMode: none
+      ExtraConnectionAttributes: "initstmt=SET foreign_key_checks=0"
+      MySqlSettings:
+        AfterConnectScript: "SET foreign_key_checks=0;"
+        CleanSourceMetadataOnMismatch: true
+        MaxFileSize: 512
+        ParallelLoadThreads: 1
+        ServerTimezone: "UTC"
+        TargetDbType: "specific-database"
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Target-Aurora-Endpoint
+        - Key: Module
+          Value: Platform
+        - Key: Purpose
+          Value: Migration-Target
+
+Outputs:
+  # Essential ARNs for Database Engineer
+  DMSSourceEndpointArn:
+    Description: DMS Source Endpoint ARN (for migration task configuration)
+    Value: !Ref DMSSourceEndpoint
+    Export:
+      Name: OrchardLite-Platform-DMS-Source-Endpoint-ARN
+
+  DMSTargetEndpointArn:
+    Description: DMS Target Endpoint ARN (for migration task configuration)
+    Value: !Ref DMSTargetEndpoint
+    Export:
+      Name: OrchardLite-Platform-DMS-Target-Endpoint-ARN

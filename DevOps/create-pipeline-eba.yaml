@@ -1,0 +1,534 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "DevOps Module - CI/CD Pipeline for OrchardLite CMS .NET 8 Modernization and ECS Deployment"
+
+Parameters:
+  # GitHub Connection Parameters
+  GitHubConnectionArn:
+    Type: String
+    Description: GitHub CodeStar Connection ARN from Application Module (leave empty to auto-import)
+    Default: ""
+
+  GitHubRepositoryOwner:
+    Type: String
+    Description: GitHub repository owner/organization name
+    Default: "vinaykuchibhotla"
+
+  GitHubRepositoryName:
+    Type: String
+    Description: GitHub repository name
+    Default: "dotnet-migration-workshop"
+
+  GitHubBranch:
+    Type: String
+    Description: GitHub branch to monitor for changes
+    Default: "main"
+
+  # VPC and Network Parameters
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC from existing deployment
+
+  PrivateSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select Private Subnet 1 for ECS deployment
+
+  PrivateSubnet2Id:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select Private Subnet 2 for ECS deployment
+
+  PublicSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select Public Subnet 1 for Load Balancer
+
+  PublicSubnet2Id:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select Public Subnet 2 for Load Balancer
+
+  # IAM Role Parameters
+  CodePipelineServiceRoleArn:
+    Type: String
+    Description: CodePipeline Service Role ARN from Security Module (leave empty to auto-import)
+    Default: ""
+
+  CodeBuildServiceRoleArn:
+    Type: String
+    Description: CodeBuild Service Role ARN from Security Module (leave empty to auto-import)
+    Default: ""
+
+  ECSTaskExecutionRoleArn:
+    Type: String
+    Description: ECS Task Execution Role ARN from Security Module (leave empty to auto-import)
+    Default: ""
+
+  ECSTaskRoleArn:
+    Type: String
+    Description: ECS Task Role ARN from Security Module (leave empty to auto-import)
+    Default: ""
+
+  # Database Parameters
+  AuroraEndpoint:
+    Type: String
+    Description: Aurora Serverless cluster endpoint
+    Default: "orchardlite-aurora-serverless.cluster-xxxxxxxxx.us-west-1.rds.amazonaws.com"
+
+  DatabaseName:
+    Type: String
+    Description: Aurora database name
+    Default: "OrchardLiteDB"
+
+  DatabaseUsername:
+    Type: String
+    Description: Aurora database username
+    Default: "auroraadmin"
+
+Conditions:
+  UseImportedGitHubConnection: !Equals [!Ref GitHubConnectionArn, ""]
+  UseImportedCodePipelineRole: !Equals [!Ref CodePipelineServiceRoleArn, ""]
+  UseImportedCodeBuildRole: !Equals [!Ref CodeBuildServiceRoleArn, ""]
+  UseImportedECSTaskExecutionRole: !Equals [!Ref ECSTaskExecutionRoleArn, ""]
+  UseImportedECSTaskRole: !Equals [!Ref ECSTaskRoleArn, ""]
+
+Resources:
+  # ============================================================================
+  # S3 BUCKET FOR PIPELINE ARTIFACTS
+  # ============================================================================
+
+  PipelineArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "orchardlite-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Pipeline-Artifacts
+        - Key: Module
+          Value: DevOps
+
+  # ============================================================================
+  # ECR REPOSITORY
+  # ============================================================================
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: orchardlite-cms
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Name
+          Value: OrchardLite-ECR-Repository
+        - Key: Module
+          Value: DevOps
+
+  # ============================================================================
+  # CODEBUILD PROJECTS
+  # ============================================================================
+
+  CodeBuildCompileProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: OrchardLite-Compile-Build
+      Description: Compile and test .NET 8 modernized application
+      ServiceRole: !If
+        - UseImportedCodeBuildRole
+        - !ImportValue OrchardLite-Security-CodeBuild-Role-ARN
+        - !Ref CodeBuildServiceRoleArn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: mcr.microsoft.com/dotnet/sdk:8.0
+        PrivilegedMode: false
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - echo Logging in to Amazon ECR...
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+            build:
+              commands:
+                - echo Build started on `date`
+                - echo Building the .NET 8 application...
+                - dotnet restore
+                - dotnet build --configuration Release
+                - dotnet test --configuration Release --no-build
+            post_build:
+              commands:
+                - echo Build completed on `date`
+          artifacts:
+            files:
+              - '**/*'
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Compile-Build
+        - Key: Module
+          Value: DevOps
+
+  CodeBuildDockerProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: OrchardLite-Docker-Build
+      Description: Build and push Docker container for .NET 8 application
+      ServiceRole: !If
+        - UseImportedCodeBuildRole
+        - !ImportValue OrchardLite-Security-CodeBuild-Role-ARN
+        - !Ref CodeBuildServiceRoleArn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref ECRRepository
+          - Name: IMAGE_TAG
+            Value: latest
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - echo Logging in to Amazon ECR...
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+            build:
+              commands:
+                - echo Build started on `date`
+                - echo Building the Docker image...
+                - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+                - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+            post_build:
+              commands:
+                - echo Build completed on `date`
+                - echo Pushing the Docker image...
+                - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+                - echo Writing image definitions file...
+                - printf '[{"name":"orchardlite-app","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG > imagedefinitions.json
+          artifacts:
+            files:
+              - imagedefinitions.json
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Docker-Build
+        - Key: Module
+          Value: DevOps
+
+  # ============================================================================
+  # APPLICATION LOAD BALANCER
+  # ============================================================================
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: OrchardLite-Modernized-ALB
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1Id
+        - !Ref PublicSubnet2Id
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Modernized-ALB
+        - Key: Module
+          Value: DevOps
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: OrchardLite-Modernized-TG
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VPCId
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Modernized-TG
+        - Key: Module
+          Value: DevOps
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for modernized application load balancer
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access from internet
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Modernized-ALB-SG
+        - Key: Module
+          Value: DevOps
+
+  # ============================================================================
+  # ECS CLUSTER AND SERVICE
+  # ============================================================================
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: OrchardLite-Modernized-Cluster
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Modernized-Cluster
+        - Key: Module
+          Value: DevOps
+
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: orchardlite-modernized-task
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 512
+      Memory: 1024
+      ExecutionRoleArn: !If
+        - UseImportedECSTaskExecutionRole
+        - !ImportValue OrchardLite-Security-ECS-TaskExecution-Role-ARN
+        - !Ref ECSTaskExecutionRoleArn
+      TaskRoleArn: !If
+        - UseImportedECSTaskRole
+        - !ImportValue OrchardLite-Security-ECS-Task-Role-ARN
+        - !Ref ECSTaskRoleArn
+      ContainerDefinitions:
+        - Name: orchardlite-app
+          Image: public.ecr.aws/docker/library/nginx:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: ASPNETCORE_ENVIRONMENT
+              Value: Production
+            - Name: ASPNETCORE_URLS
+              Value: "http://+:8080"
+            - Name: ConnectionStrings__DefaultConnection
+              Value: !Sub "Server=${AuroraEndpoint};Database=${DatabaseName};Uid=${DatabaseUsername};Pwd=AuroraPassword2024!;"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Modernized-TaskDef
+        - Key: Module
+          Value: DevOps
+
+  # ECS Service will be created by CodePipeline deployment action
+  # Initial deployment skipped to avoid circuit breaker trigger without container image
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for modernized ECS tasks
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: HTTP access from ALB only
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound for AWS services
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 10.0.0.0/16
+          Description: MySQL access to Aurora database
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Modernized-ECS-SG
+        - Key: Module
+          Value: DevOps
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/orchardlite-modernized
+      RetentionInDays: 7
+
+  # ============================================================================
+  # CODEPIPELINE
+  # ============================================================================
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: OrchardLite-Modernization-Pipeline
+      RoleArn: !If
+        - UseImportedCodePipelineRole
+        - !ImportValue OrchardLite-Security-CodePipeline-Role-ARN
+        - !Ref CodePipelineServiceRoleArn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactsBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              Configuration:
+                ConnectionArn: !If
+                  - UseImportedGitHubConnection
+                  - !ImportValue OrchardLite-Application-GitHub-Connection-ARN
+                  - !Ref GitHubConnectionArn
+                FullRepositoryId: !Sub "${GitHubRepositoryOwner}/${GitHubRepositoryName}"
+                BranchName: !Ref GitHubBranch
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceOutput
+
+        - Name: Build
+          Actions:
+            - Name: CompileAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref CodeBuildCompileProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: CompileOutput
+
+        - Name: Package
+          Actions:
+            - Name: DockerBuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref CodeBuildDockerProject
+              InputArtifacts:
+                - Name: CompileOutput
+              OutputArtifacts:
+                - Name: DockerOutput
+
+        - Name: Deploy
+          Actions:
+            - Name: DeployAction
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: ECS
+                Version: "1"
+              Configuration:
+                ClusterName: !Ref ECSCluster
+                ServiceName: orchardlite-modernized-service
+                FileName: imagedefinitions.json
+              InputArtifacts:
+                - Name: DockerOutput
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Modernization-Pipeline
+        - Key: Module
+          Value: DevOps
+
+Outputs:
+  # Pipeline Information
+  PipelineName:
+    Description: CodePipeline Name
+    Value: !Ref CodePipeline
+    Export:
+      Name: OrchardLite-DevOps-Pipeline-Name
+
+  # Application Access
+  ApplicationURL:
+    Description: Modernized Application URL
+    Value: !Sub "http://${ApplicationLoadBalancer.DNSName}"
+    Export:
+      Name: OrchardLite-DevOps-Application-URL
+
+  # ECS Information
+  ECSClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+    Export:
+      Name: OrchardLite-DevOps-ECS-Cluster-Name
+
+  ECRRepositoryURI:
+    Description: ECR Repository URI
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}"
+    Export:
+      Name: OrchardLite-DevOps-ECR-Repository-URI

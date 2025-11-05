@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Application Module - GitHub Repository Connection Setup for OrchardLite CMS Modernization"
+
+Parameters:
+  GitHubRepositoryOwner:
+    Type: String
+    Description: GitHub repository owner/organization name
+    Default: "vinaykuchibhotla"
+
+  GitHubRepositoryName:
+    Type: String
+    Description: GitHub repository name
+    Default: "dotnet-migration-workshop"
+
+  ConnectionName:
+    Type: String
+    Description: Name for the CodeStar connection
+    Default: "orchardlite-github-connection"
+
+Resources:
+  # ============================================================================
+  # GITHUB CODESTAR CONNECTION
+  # ============================================================================
+
+  GitHubCodeStarConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName: !Ref ConnectionName
+      ProviderType: GitHub
+      Tags:
+        - Key: Name
+          Value: OrchardLite-GitHub-Connection
+        - Key: Module
+          Value: Application
+        - Key: Purpose
+          Value: Source-Control-Integration
+        - Key: Repository
+          Value: !Sub "${GitHubRepositoryOwner}/${GitHubRepositoryName}"
+
+Outputs:
+  # GitHub Connection Information
+  GitHubConnectionArn:
+    Description: GitHub CodeStar Connection ARN
+    Value: !Ref GitHubCodeStarConnection
+    Export:
+      Name: OrchardLite-Application-GitHub-Connection-ARN
+
+  GitHubConnectionId:
+    Description: GitHub CodeStar Connection ID
+    Value: !Ref GitHubCodeStarConnection
+    Export:
+      Name: OrchardLite-Application-GitHub-Connection-ID
+
+  # Repository Information
+  GitHubRepositoryUrl:
+    Description: GitHub Repository URL
+    Value: !Sub "https://github.com/${GitHubRepositoryOwner}/${GitHubRepositoryName}"
+    Export:
+      Name: OrchardLite-Application-GitHub-Repository-URL
+
+  GitHubRepositoryCloneUrl:
+    Description: GitHub Repository Clone URL for CodeBuild
+    Value: !Sub "https://github.com/${GitHubRepositoryOwner}/${GitHubRepositoryName}.git"
+    Export:
+      Name: OrchardLite-Application-GitHub-Clone-URL

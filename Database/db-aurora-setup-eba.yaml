@@ -1,0 +1,266 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Database Module - Aurora Serverless v2 Cluster for OrchardLite CMS Modernization"
+
+Parameters:
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC from existing deployment
+
+  PrivateSubnet1Id:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select Private Subnet 1 from Platform Module
+
+  PrivateSubnet2Id:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select Private Subnet 2 from Platform Module
+
+  AuroraSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Select Aurora Security Group from Platform Module
+
+  DatabaseName:
+    Type: String
+    Description: Name of the initial database to create
+    Default: OrchardLiteDB
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: ^[a-zA-Z][a-zA-Z0-9]*$
+
+  MasterUsername:
+    Type: String
+    Description: Master username for Aurora cluster
+    Default: auroraadmin
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: ^[a-zA-Z][a-zA-Z0-9]*$
+
+  MasterUserPassword:
+    Type: String
+    Description: Master password for Aurora cluster
+    NoEcho: true
+    Default: AuroraPassword2024!
+    MinLength: 8
+    MaxLength: 128
+    AllowedPattern: ^[a-zA-Z0-9!@#$%^&*()_+=-]*$
+
+  BackupRetentionPeriod:
+    Type: Number
+    Description: Number of days to retain automated backups
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+
+Resources:
+  # ============================================================================
+  # DB SUBNET GROUP
+  # ============================================================================
+
+  AuroraDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: aurora-serverless-subnet-group
+      DBSubnetGroupDescription: Subnet group for Aurora Serverless cluster in private subnets
+      SubnetIds:
+        - !Ref PrivateSubnet1Id
+        - !Ref PrivateSubnet2Id
+      Tags:
+        - Key: Name
+          Value: Aurora-Serverless-SubnetGroup
+        - Key: Module
+          Value: Database
+        - Key: Purpose
+          Value: Aurora
+
+  # ============================================================================
+  # DB PARAMETER GROUPS
+  # ============================================================================
+
+  AuroraClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Family: aurora-mysql8.0
+      Description: Aurora MySQL 8.0 cluster parameter group for OrchardLite
+      Parameters:
+        innodb_buffer_pool_size: "{DBInstanceClassMemory*3/4}"
+        max_connections: "1000"
+        slow_query_log: "1"
+        long_query_time: "2"
+        general_log: "0"
+        binlog_format: "ROW"
+        character_set_server: "utf8mb4"
+        collation_server: "utf8mb4_unicode_ci"
+      Tags:
+        - Key: Name
+          Value: Aurora-Cluster-ParameterGroup
+        - Key: Module
+          Value: Database
+
+  AuroraDBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: aurora-mysql8.0
+      Description: Aurora MySQL 8.0 DB parameter group for OrchardLite
+      Parameters:
+        innodb_print_all_deadlocks: "1"
+        slow_query_log: "1"
+        long_query_time: "2"
+        log_queries_not_using_indexes: "1"
+      Tags:
+        - Key: Name
+          Value: Aurora-DB-ParameterGroup
+        - Key: Module
+          Value: Database
+
+  # ============================================================================
+  # AURORA SERVERLESS CLUSTER
+  # ============================================================================
+
+  AuroraServerlessCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Delete
+    Properties:
+      DBClusterIdentifier: orchardlite-aurora-serverless
+      Engine: aurora-mysql
+      EngineMode: provisioned
+      DatabaseName: !Ref DatabaseName
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      DBSubnetGroupName: !Ref AuroraDBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref AuroraSecurityGroupId
+      DBClusterParameterGroupName: !Ref AuroraClusterParameterGroup
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      PreferredBackupWindow: "03:00-04:00"
+      PreferredMaintenanceWindow: "sun:04:00-sun:05:00"
+      StorageEncrypted: true
+      KmsKeyId: alias/aws/rds
+      EnableCloudwatchLogsExports:
+        - error
+        - general
+        - slowquery
+      DeletionProtection: false
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 16
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Aurora-Serverless
+        - Key: Module
+          Value: Database
+        - Key: Environment
+          Value: Workshop
+        - Key: Engine
+          Value: Aurora-MySQL
+
+  # ============================================================================
+  # AURORA DB INSTANCE
+  # ============================================================================
+
+  AuroraPrimaryInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: orchardlite-aurora-primary
+      DBClusterIdentifier: !Ref AuroraServerlessCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-mysql
+      DBParameterGroupName: !Ref AuroraDBParameterGroup
+      PubliclyAccessible: false
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt EnhancedMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: OrchardLite-Aurora-Primary
+        - Key: Module
+          Value: Database
+        - Key: Role
+          Value: Primary
+
+  # ============================================================================
+  # IAM ROLE FOR ENHANCED MONITORING
+  # ============================================================================
+
+  EnhancedMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "Aurora-EnhancedMonitoring-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+      Tags:
+        - Key: Name
+          Value: Aurora-EnhancedMonitoring-Role
+        - Key: Module
+          Value: Database
+
+Outputs:
+  # Aurora Cluster Information
+  AuroraClusterIdentifier:
+    Description: Aurora Serverless Cluster Identifier
+    Value: !Ref AuroraServerlessCluster
+    Export:
+      Name: OrchardLite-Database-Aurora-Cluster-ID
+
+  AuroraClusterEndpoint:
+    Description: Aurora Cluster Writer Endpoint
+    Value: !GetAtt AuroraServerlessCluster.Endpoint.Address
+    Export:
+      Name: OrchardLite-Database-Aurora-Endpoint
+
+  AuroraClusterReadEndpoint:
+    Description: Aurora Cluster Reader Endpoint
+    Value: !GetAtt AuroraServerlessCluster.ReadEndpoint.Address
+    Export:
+      Name: OrchardLite-Database-Aurora-ReadEndpoint
+
+  AuroraClusterPort:
+    Description: Aurora Cluster Port
+    Value: !GetAtt AuroraServerlessCluster.Endpoint.Port
+    Export:
+      Name: OrchardLite-Database-Aurora-Port
+
+  # Database Configuration
+  DatabaseName:
+    Description: Initial Database Name
+    Value: !Ref DatabaseName
+    Export:
+      Name: OrchardLite-Database-Aurora-DBName
+
+  MasterUsername:
+    Description: Master Username
+    Value: !Ref MasterUsername
+    Export:
+      Name: OrchardLite-Database-Aurora-Username
+
+  # Resource Information
+  DBSubnetGroupName:
+    Description: DB Subnet Group Name
+    Value: !Ref AuroraDBSubnetGroup
+    Export:
+      Name: OrchardLite-Database-Aurora-SubnetGroup
+
+  ClusterParameterGroupName:
+    Description: Cluster Parameter Group Name
+    Value: !Ref AuroraClusterParameterGroup
+    Export:
+      Name: OrchardLite-Database-Aurora-ClusterPG
+
+  DBParameterGroupName:
+    Description: DB Parameter Group Name
+    Value: !Ref AuroraDBParameterGroup
+    Export:
+      Name: OrchardLite-Database-Aurora-DBPG
+
+  # Connection Information for Applications
+  AuroraConnectionString:
+    Description: Aurora Connection String Template
+    Value: !Sub "mysql://${MasterUsername}:${MasterUserPassword}@${AuroraServerlessCluster.Endpoint.Address}:${AuroraServerlessCluster.Endpoint.Port}/${DatabaseName}"
+    Export:
+      Name: OrchardLite-Database-Aurora-ConnectionString

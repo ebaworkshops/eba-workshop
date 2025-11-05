@@ -1,0 +1,352 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Security Module - IAM Roles Setup for OrchardLite CMS Modernization Workshop"
+
+Resources:
+  # ============================================================================
+  # DMS IAM ROLES
+  # ============================================================================
+
+  DMSVPCRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: dms-vpc-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: dms.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole
+      Tags:
+        - Key: Name
+          Value: DMS-VPC-Management-Role
+        - Key: Module
+          Value: Security
+        - Key: Purpose
+          Value: DMS-VPC-Access
+
+  DMSCloudWatchLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: dms-cloudwatch-logs-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: dms.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole
+      Tags:
+        - Key: Name
+          Value: DMS-CloudWatch-Logs-Role
+        - Key: Module
+          Value: Security
+        - Key: Purpose
+          Value: DMS-Logging
+
+  # ============================================================================
+  # CODEPIPELINE IAM ROLES
+  # ============================================================================
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrchardLite-CodePipeline-ServiceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+
+      Policies:
+        - PolicyName: CodePipelineCustomPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketVersioning
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: CodePipeline-Service-Role
+        - Key: Module
+          Value: Security
+        - Key: Purpose
+          Value: CI-CD-Pipeline
+
+  # ============================================================================
+  # CODEBUILD IAM ROLES
+  # ============================================================================
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrchardLite-CodeBuild-ServiceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildCustomPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: CodeBuild-Service-Role
+        - Key: Module
+          Value: Security
+        - Key: Purpose
+          Value: Build-Compile
+
+  # ============================================================================
+  # ECS IAM ROLES
+  # ============================================================================
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrchardLite-ECS-TaskExecution-Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ECSTaskExecutionCustomPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: ECS-TaskExecution-Role
+        - Key: Module
+          Value: Security
+        - Key: Purpose
+          Value: Container-Execution
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrchardLite-ECS-Task-Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSTaskCustomPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-db:connect
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: ECS-Task-Role
+        - Key: Module
+          Value: Security
+        - Key: Purpose
+          Value: Application-Runtime
+
+  # ============================================================================
+  # LAMBDA IAM ROLES
+  # ============================================================================
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrchardLite-Lambda-Execution-Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaCustomPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                  - ecs:DescribeTasks
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackResources
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codepipeline:PutJobSuccessResult
+                  - codepipeline:PutJobFailureResult
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: Lambda-Execution-Role
+        - Key: Module
+          Value: Security
+        - Key: Purpose
+          Value: Deployment-Automation
+
+  # ============================================================================
+  # CLOUDWATCH EVENTS IAM ROLES
+  # ============================================================================
+
+  CloudWatchEventsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrchardLite-Events-Execution-Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EventsCustomPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codepipeline:StartPipelineExecution
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: CloudWatch-Events-Role
+        - Key: Module
+          Value: Security
+        - Key: Purpose
+          Value: Event-Triggers
+
+Outputs:
+  # Essential Role ARNs for Cross-Stack References
+  CodePipelineServiceRoleArn:
+    Description: CodePipeline Service Role ARN
+    Value: !GetAtt CodePipelineServiceRole.Arn
+    Export:
+      Name: OrchardLite-Security-CodePipeline-Role-ARN
+
+  CodeBuildServiceRoleArn:
+    Description: CodeBuild Service Role ARN
+    Value: !GetAtt CodeBuildServiceRole.Arn
+    Export:
+      Name: OrchardLite-Security-CodeBuild-Role-ARN
+
+  ECSTaskExecutionRoleArn:
+    Description: ECS Task Execution Role ARN
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+    Export:
+      Name: OrchardLite-Security-ECS-TaskExecution-Role-ARN
+
+  ECSTaskRoleArn:
+    Description: ECS Task Role ARN
+    Value: !GetAtt ECSTaskRole.Arn
+    Export:
+      Name: OrchardLite-Security-ECS-Task-Role-ARN
+
+  LambdaExecutionRoleArn:
+    Description: Lambda Execution Role ARN
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: OrchardLite-Security-Lambda-Execution-Role-ARN
+
+  CloudWatchEventsRoleArn:
+    Description: CloudWatch Events Role ARN
+    Value: !GetAtt CloudWatchEventsRole.Arn
+    Export:
+      Name: OrchardLite-Security-Events-Execution-Role-ARN

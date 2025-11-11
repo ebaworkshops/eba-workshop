@@ -1,129 +1,232 @@
 # OrchardLite CMS - AWS Modernization Workshop
 
-## 🚀 Quick Deploy (10 minutes)
+A complete .NET modernization workshop demonstrating migration from legacy .NET Core 3.1 to modern .NET 8 using AWS services.
+
+## Overview
+
+This workshop provides a hands-on experience modernizing a legacy .NET application using:
+- **AWS Transform** - Automated code modernization
+- **AWS DMS** - Database migration from RDS to Aurora
+- **AWS CodePipeline** - CI/CD automation
+- **ECS Fargate** - Container orchestration
+
+## Quick Start
 
 ### Prerequisites
-- AWS CLI installed on your computer
-- AWS account with appropriate permissions
+- AWS Account with appropriate permissions
+- AWS CLI configured
+- Git installed
 
-### Step-by-Step Deployment
+### Deploy the Application
 
-#### Step 1: Clone the Repository
 ```bash
-# Clone the workshop repository
-git clone https://git-codecommit.us-west-1.amazonaws.com/v1/repos/dotnet-migration-workshop
+# Clone the repository
+git clone https://github.com/vinaykuchibhotla/dotnet-migration-workshop.git
 cd dotnet-migration-workshop
+
+# Deploy using CloudFormation
+aws cloudformation create-stack \
+  --stack-name orchardlite-workshop \
+  --template-body file://orchardlite-dotnet-bootstrap.yaml \
+  --parameters \
+    ParameterKey=DBPassword,ParameterValue=YourSecurePassword123! \
+    ParameterKey=AppDBPassword,ParameterValue=YourAppPassword123! \
+    ParameterKey=MyIPAddress,ParameterValue=YOUR_IP/32 \
+  --capabilities CAPABILITY_IAM \
+  --region us-east-1
+
+# Wait for completion (15-20 minutes)
+aws cloudformation wait stack-create-complete \
+  --stack-name orchardlite-workshop \
+  --region us-east-1
+
+# Get application URL
+aws cloudformation describe-stacks \
+  --stack-name orchardlite-workshop \
+  --query 'Stacks[0].Outputs[?OutputKey==`ApplicationURL`].OutputValue' \
+  --output text
 ```
 
-#### Step 2: Configure AWS CLI
-If you haven't configured AWS CLI before, run:
+### Access the Application
+
+Open the URL from the output in your browser. You should see the OrchardLite CMS homepage with 100 sample content items.
+
+## What Gets Deployed
+
+The CloudFormation template automatically provisions:
+
+### Infrastructure
+- VPC with 2 public subnets across 2 AZs
+- Application Load Balancer
+- RDS MySQL 8.0 database
+- Security groups and networking
+
+### Application Platform
+- ECR repository for Docker images
+- CodeBuild project (builds from GitHub)
+- ECS Fargate cluster and service
+- CloudWatch logs
+
+### Application
+- .NET Core 3.1 MVC application
+- Automatic database initialization
+- 100 sample content records
+- Bootstrap UI
+
+## Workshop Tasks
+
+### Task 1: Current State Analysis
+- Review the deployed .NET Core 3.1 application
+- Identify legacy patterns and security issues
+- Check `/health` endpoint for system information
+
+### Task 2: AWS Transform Analysis
+1. Navigate to AWS Transform console
+2. Create transformation project
+3. Point to this GitHub repository
+4. Analyze the `/OrchardLiteApp` folder
+5. Review modernization recommendations
+
+### Task 3: Code Modernization
+- AWS Transform upgrades .NET Core 3.1 → .NET 8
+- Review generated code changes
+- Transform pushes upgraded code to repository
+
+### Task 4: Database Migration (DMS)
+- Use templates in `/Database` folder
+- Migrate from RDS MySQL to Aurora Serverless
+- Follow guide: `/Database/DMS-TASK-START-GUIDE.md`
+
+### Task 5: CI/CD Pipeline
+- Use template in `/DevOps` folder
+- Create CodePipeline for automated deployments
+- Deploy upgraded .NET 8 application
+
+### Task 6: Blue/Green Deployment
+- Create new target group for .NET 8
+- Test both versions side-by-side
+- Swap ALB listener rules
+- Decommission .NET Core 3.1
+
+## Application Features
+
+### Current State (Phase 1)
+- 🔴 **.NET Core 3.1** (End of Life)
+- 🔴 **RDS MySQL** (Single instance)
+- 🔴 **Public Subnets** (Security risk)
+- 🔴 **Manual Deployments**
+- 🔴 **Legacy MySQL Connector**
+
+### After Modernization (Phase 2)
+- 🟢 **.NET 8** (Latest LTS)
+- 🟢 **Aurora Serverless** (Managed, scalable)
+- 🟢 **Private Subnets** (Secure)
+- 🟢 **CI/CD Pipeline** (Automated)
+- 🟢 **Modern Connectors** (Optimized)
+
+## Project Structure
+
+```
+/OrchardLiteApp/          # .NET Core 3.1 application
+├── OrchardLite.sln       # Solution file
+├── Dockerfile            # Container definition
+└── OrchardLite.Web/      # MVC application
+    ├── Controllers/      # MVC controllers
+    ├── Models/           # Data models
+    ├── Views/            # Razor views
+    └── Services/         # Database initialization
+
+/Database/                # DMS templates
+/DevOps/                  # CodePipeline templates
+/Platform/                # Network and infrastructure
+/Security/                # IAM and secrets
+
+buildspec.yml             # CodeBuild specification
+orchardlite-dotnet-bootstrap.yaml  # Main deployment template
+QUICKSTART.md             # Quick reference guide
+```
+
+## Cost Estimates
+
+Approximate hourly costs (us-east-1):
+- **RDS db.t3.micro:** $0.017/hour
+- **ECS Fargate (0.5 vCPU, 1GB):** $0.024/hour
+- **ALB:** $0.025/hour
+- **Total:** ~$0.07/hour or ~$1.68/day
+
+## Cleanup
+
 ```bash
-aws configure
+# Delete the CloudFormation stack
+aws cloudformation delete-stack --stack-name orchardlite-workshop
+
+# Wait for deletion to complete
+aws cloudformation wait stack-delete-complete --stack-name orchardlite-workshop
 ```
 
-You'll be prompted to enter:
-- **AWS Access Key ID**: `AKIAIOSFODNN7EXAMPLE` (replace with your actual key)
-- **AWS Secret Access Key**: `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` (replace with your actual secret)
-- **Default region name**: `us-west-1` (or your preferred region)
-- **Default output format**: `json` (recommended)
+## Troubleshooting
 
-**Note:** Get your actual AWS credentials from:
-- AWS Console → IAM → Users → [Your User] → Security credentials → Access keys
-- Or from your AWS administrator
+### Stack Creation Fails
+- Check CloudFormation Events tab for errors
+- Verify AWS CLI is configured correctly
+- Ensure you have necessary IAM permissions
 
-#### Step 3: Make Deploy Script Executable
-```bash
-# Make the deployment script executable
-chmod +x deploy.sh
+### Application Not Accessible
+- Wait full 15-20 minutes for deployment
+- Check ECS service is running
+- Verify security group allows your IP
+
+### Build Failures
+- Check CodeBuild logs in CloudWatch
+- Verify GitHub repository is accessible
+- Ensure buildspec.yml exists in repo root
+
+## Documentation
+
+- **QUICKSTART.md** - Quick reference for common tasks
+- **OrchardLiteApp/README.md** - Application-specific documentation
+- **Database/DMS-TASK-START-GUIDE.md** - Database migration guide
+
+## Support
+
+For issues or questions:
+1. Check CloudFormation Events for errors
+2. Review CloudWatch Logs for application logs
+3. Verify all prerequisites are met
+4. Check security group configurations
+
+## Architecture
+
+```
+Internet
+    │
+    ▼
+   ALB
+    │
+    ├─────────┬─────────┐
+    │         │         │
+ECS Task  ECS Task   RDS MySQL
+(.NET 3.1) (.NET 3.1)  (8.0)
+    │         │         │
+    └─────────┴─────────┘
+              │
+            ECR
+              ▲
+              │
+         CodeBuild
+              ▲
+              │
+           GitHub
 ```
 
-#### Step 4: Deploy the Application
-```bash
-# Run the deployment script
-./deploy.sh
-```
+## Next Steps
 
-#### Step 5: Get Your Application URL
-After deployment completes (8-10 minutes), get your application URL:
-```bash
-# Replace 'orchardlite-workshop-*' with your actual stack name from the deployment output
-aws cloudformation describe-stacks --stack-name orchardlite-workshop-1234567890 --query 'Stacks[0].Outputs[?OutputKey==`ApplicationURL`].OutputValue' --output text
-```
-
-**Example output:**
-```
-http://OrchardLite-Enterprise-ALB-1234567890.us-west-1.elb.amazonaws.com
-```
-
-Copy and paste this URL into your web browser to access the application.
-
-## 📊 What You'll See
-
-### Phase 1 - Current State (Insecure by Design)
-- 🔴 **.NET Framework 4.8** - Legacy framework
-- 🔴 **RDS MySQL (Public)** - Database in public subnet
-- 🔴 **Public Subnets Only** - No network isolation
-- 🔴 **Manual CloudFormation** - No CI/CD pipeline
-- 🔴 **License Issues** - GPL/AGPL compliance problems
-
-### After Modernization (Workshop Goal)
-- 🟢 **.NET 8.0** - Modern framework
-- 🟢 **Aurora MySQL (Serverless)** - Modern managed database
-- 🟢 **Private Subnets + VPC Endpoints** - Secure network
-- 🟢 **CI/CD Pipeline Active** - Full automation
-- 🟢 **License Compliant** - Issues resolved
-
-## 🔧 Workshop Flow
-1. **Deploy Phase 1** - See current insecure state
-2. **AWS Transform** - Modernize .NET Framework → .NET 8
-3. **Database Migration** - RDS → Aurora using AWS DMS
-4. **Network Security** - Public → Private subnets
-5. **DevOps Pipeline** - Manual → CI/CD automation
-6. **License Compliance** - Resolve GPL/AGPL issues
-
-## 🎪 Live Status Detection
-The application automatically detects and displays:
-- Framework version changes
-- Database migration progress
-- Network security improvements
-- Deployment pipeline status
-- License compliance status
-
-**The UI updates in real-time as you complete each modernization step!**
-
-## 🧹 Cleanup
-```bash
-# Delete the stack when done
-aws cloudformation delete-stack --stack-name orchardlite-workshop-*
-```
-
-## 🆘 Troubleshooting
-
-### Common Issues for Beginners
-
-**❌ "aws: command not found"**
-- Install AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
-
-**❌ "Unable to locate credentials"**
-- Run `aws configure` and enter your AWS credentials
-- Verify credentials work: `aws sts get-caller-identity`
-
-**❌ "Permission denied: ./deploy.sh"**
-- Make script executable: `chmod +x deploy.sh`
-
-**❌ "Stack creation failed"**
-- Check AWS CLI configuration: `aws configure list`
-- Verify you have sufficient AWS permissions (EC2, RDS, ECS, CloudFormation)
-- Check if you're in the correct region: `aws configure get region`
-
-**❌ "Application not accessible"**
-- Wait 8-10 minutes for full deployment
-- Check stack status: `aws cloudformation describe-stacks --stack-name [your-stack-name] --query 'Stacks[0].StackStatus'`
-- If status is `CREATE_COMPLETE`, try the application URL again
-
-**❌ "Database connection issues"**
-- RDS takes the longest to initialize (5-8 minutes)
-- Check CloudFormation events for detailed error messages
+1. Deploy the application using the Quick Start guide
+2. Access the application and explore the UI
+3. Run AWS Transform analysis
+4. Follow workshop tasks to modernize the application
+5. Compare before/after performance and security
 
 ---
-**Ready to modernize? Run `./deploy.sh` and let's begin!** 🚀
+
+**Ready to modernize your .NET application? Let's get started!** 🚀

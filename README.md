@@ -1,132 +1,106 @@
-# OrchardLite CMS
+# OrchardLite CMS — AWS Modernization Workshop
 
-A legacy .NET Core 3.1 content management system built with ASP.NET Core MVC and MySQL.
+A legacy .NET Core 3.1 content management system used as the starting point for the AWS Enterprise Breakthrough Advance (EBA) Modernization Workshop. The workshop demonstrates transforming a legacy .NET application to .NET 8 using AWS Transform, with automated CI/CD deployment via CodePipeline.
 
-## Overview
+## Workshop Flow
 
-OrchardLite CMS is a sample enterprise content management application that demonstrates common patterns found in legacy .NET applications. The application provides basic content management capabilities including creating, viewing, and organizing blog posts and articles.
+1. **Current State** — Deploy the legacy .NET Core 3.1 application on ECS Fargate with RDS MySQL
+2. **Database Migration** — Use AWS DMS to migrate data from RDS MySQL to Aurora Serverless v2
+3. **Application Transformation** — AWS Transform analyzes the codebase and upgrades to .NET 8
+4. **Automated Deployment** — Transform checks the upgraded code into a new branch, triggering the CI/CD pipeline
+5. **Validation** — The UI dynamically reflects the modernized state (framework version, database type, network security)
+
+## Repository Structure
+
+```
+├── buildspec.yml                        # Unified build spec (works for both 3.1 and .NET 8)
+├── OrchardLiteApp/
+│   ├── OrchardLite.sln
+│   ├── Dockerfile                       # Legacy Dockerfile (3.1)
+│   └── OrchardLite.Web/
+│       ├── Program.cs                   # Host builder entry point
+│       ├── Startup.cs                   # MVC + DB initialization
+│       ├── OrchardLite.Web.csproj       # Target framework (netcoreapp3.1 → net8.0)
+│       ├── appsettings.json             # Connection string template
+│       ├── Controllers/
+│       │   └── HomeController.cs        # Content listing, health check, dynamic env detection
+│       ├── Models/
+│       │   └── ContentItem.cs           # Content data model
+│       ├── Services/
+│       │   └── DatabaseInitializer.cs   # Auto-creates DB, table, seeds 100 records
+│       └── Views/
+│           ├── Home/
+│           │   ├── Index.cshtml         # Dashboard with dynamic modernization status
+│           │   └── AllContent.cshtml    # Full content listing
+│           └── Shared/
+│               ├── _Layout.cshtml       # Dynamic layout (badges adapt to runtime)
+│               └── Error.cshtml         # Error page
+```
+
+## How the Dual-Mode Build Works
+
+The `buildspec.yml` is designed to work for both the legacy `main` branch and the transformed branch without any manual changes:
+
+1. Reads `TargetFramework` from `.csproj` to detect `netcoreapp3.1` vs `net8.0`
+2. Sets the appropriate SDK and runtime Docker image tags
+3. Auto-fixes common AWS Transform compilation issues (e.g., `CS0136` duplicate variable declarations)
+4. Generates a `Dockerfile.generated` matching the detected framework
+5. Builds, pushes to ECR, and outputs `imagedefinitions.json` for ECS deployment
+
+The Razor views are also self-adapting — `_Layout.cshtml` and `Index.cshtml` detect the .NET runtime version and database host at runtime to render the correct badges, warnings, and status indicators.
 
 ## Technology Stack
 
-- **.NET Core 3.1** (End of Life: December 2022)
-- **ASP.NET Core MVC** - Web framework
-- **MySQL 8.0** - Database
-- **Bootstrap 5** - UI framework
-- **Docker** - Containerization
-
-## Features
-
-- Content item management (blog posts, articles, pages)
-- MySQL database integration
-- Responsive Bootstrap UI
-- Health check endpoint
-- Automatic database initialization with sample data
-- Docker support for containerized deployment
-
-## Application Structure
-
-```
-/OrchardLiteApp/
-├── OrchardLite.sln              # Solution file
-├── Dockerfile                    # Container definition
-└── OrchardLite.Web/             # MVC application
-    ├── Controllers/             # MVC controllers
-    ├── Models/                  # Data models
-    ├── Views/                   # Razor views
-    ├── Services/                # Business logic
-    └── appsettings.json         # Configuration
-```
-
-## Database Schema
-
-The application uses a simple content management schema:
-
-**ContentItems Table:**
-- Id (Primary Key)
-- Title
-- Summary
-- Body
-- ContentType (BlogPost, Article, Page, Tutorial)
-- AuthorId
-- PublishedDate
-- ViewCount
-- IsPublished
-- CreatedDate
+| Component | Legacy (main) | Transformed |
+|-----------|---------------|-------------|
+| Framework | .NET Core 3.1 | .NET 8 |
+| Database  | RDS MySQL 8.0 | Aurora Serverless v2 |
+| Network   | Public subnets | Private subnets with NAT |
+| Connector | MySql.Data 8.0.33 | Updated by Transform |
+| Config    | Startup.cs pattern | Modernized by Transform |
 
 ## Environment Variables
 
-The application requires the following environment variables:
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DB_HOST` | MySQL/Aurora hostname | `localhost` |
+| `DB_PORT` | Database port | `3306` |
+| `DB_NAME` | Database name | `OrchardLiteDB` |
+| `DB_USER` | Database username | `root` |
+| `DB_PASSWORD` | Database password | `password` |
 
-- `DB_HOST` - MySQL database hostname
-- `DB_PORT` - MySQL database port (default: 3306)
-- `DB_NAME` - Database name (default: OrchardLiteDB)
-- `DB_USER` - Database username
-- `DB_PASSWORD` - Database password
+## Endpoints
+
+| Path | Description |
+|------|-------------|
+| `/` | Dashboard with content listing and modernization status |
+| `/all-content` | All content items |
+| `/health` | JSON health check (framework version, database type, phase) |
 
 ## Running Locally
 
-### Prerequisites
-- .NET Core 3.1 SDK
-- MySQL 8.0
-- Docker (optional)
-
-### Using .NET CLI
-
 ```bash
-# Navigate to the application directory
 cd OrchardLiteApp/OrchardLite.Web
 
-# Set environment variables
 export DB_HOST=localhost
 export DB_PORT=3306
 export DB_NAME=OrchardLiteDB
 export DB_USER=root
 export DB_PASSWORD=yourpassword
 
-# Run the application
 dotnet run
 ```
 
-### Using Docker
+## Legacy Patterns (Intentional)
 
-```bash
-# Build the Docker image
-cd OrchardLiteApp
-docker build -t orchardlite-cms:latest .
+This application intentionally uses patterns that AWS Transform will detect and modernize:
 
-# Run the container
-docker run -p 80:80 \
-  -e DB_HOST=your-db-host \
-  -e DB_PORT=3306 \
-  -e DB_NAME=OrchardLiteDB \
-  -e DB_USER=your-user \
-  -e DB_PASSWORD=your-password \
-  orchardlite-cms:latest
-```
-
-## Endpoints
-
-- `/` - Home page with content listing
-- `/all-content` - View all content items
-- `/health` - Health check endpoint (returns JSON)
-
-## Database Initialization
-
-The application automatically initializes the database on first run:
-- Creates the `OrchardLiteDB` database if it doesn't exist
-- Creates the `ContentItems` table
-- Seeds 100 sample content records for demonstration
-
-## Legacy Patterns
-
-This application intentionally uses legacy patterns typical of older .NET applications:
-
-- .NET Core 3.1 (end of life, no longer supported)
-- Legacy MySQL connector (MySql.Data)
-- Traditional Startup.cs configuration pattern
-- No modern performance optimizations
-- Missing security best practices
+- .NET Core 3.1 (EOL December 2022)
+- Legacy `MySql.Data` connector
+- Traditional `Startup.cs` configuration
+- Manual ADO.NET data access (no ORM)
+- Direct `new DatabaseInitializer()` instead of DI registration
 
 ## License
 
-This is a demonstration application for educational purposes.
+This project is licensed under the MIT-0 License. See the [LICENSE](LICENSE) file.

@@ -1,3 +1,11 @@
+@{
+    var dotnetVersion = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
+    var isModern = dotnetVersion.Contains(".NET 8");
+    var frameworkLabel = isModern ? ".NET 8.0" : ".NET Core 3.1";
+    var frameworkBadge = isModern ? "bg-success" : "bg-danger";
+    var dbLabel = isModern ? "Aurora Serverless" : "RDS MySQL 8.0";
+    var dbBadge = isModern ? "bg-success" : "bg-danger";
+}
 <!DOCTYPE html>
 <html>
 <head>
@@ -12,8 +20,8 @@
         <div class="container">
             <a class="navbar-brand text-white" href="/"><i class="fas fa-leaf" style="color: #FF9900;"></i> OrchardLite CMS</a>
             <div class="navbar-nav ms-auto">
-                <span class="badge bg-danger me-2"><i class="fas fa-code"></i> .NET Core 3.1</span>
-                <span class="badge bg-danger"><i class="fas fa-database"></i> RDS MySQL 8.0</span>
+                <span class="badge @frameworkBadge me-2"><i class="fas fa-code"></i> @frameworkLabel</span>
+                <span class="badge @dbBadge"><i class="fas fa-database"></i> @dbLabel</span>
             </div>
         </div>
     </nav>
@@ -26,8 +34,8 @@
         <div class="container text-center">
             <small class="text-muted">
                 OrchardLite CMS - Enterprise Content Management | 
-                <i class="fas fa-code"></i> <span class="text-danger">.NET Core 3.1</span> | 
-                <i class="fas fa-database"></i> <span class="text-danger">RDS MySQL 8.0</span>
+                <i class="fas fa-code"></i> <span class="@(isModern ? "text-success" : "text-danger")">@frameworkLabel</span> | 
+                <i class="fas fa-database"></i> <span class="@(isModern ? "text-success" : "text-danger")">@dbLabel</span>
             </small>
         </div>
     </footer>

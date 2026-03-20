@@ -148,10 +148,10 @@ namespace OrchardLite.Web.Controllers
         public IActionResult Health()
         {
             // Dynamically detect environment
-            var dbHost = (Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost").ToLower();
+            var healthDbHost = (Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost").ToLower();
             var dotnetVersion = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
             var isTransformed = dotnetVersion.Contains(".NET 8") || dotnetVersion.Contains(".NET Core 8");
-            var isAurora = dbHost.Contains("aurora") || dbHost.Contains("cluster");
+            var isAurora = healthDbHost.Contains("aurora") || healthDbHost.Contains("cluster");
             
             var health = new
             {
@@ -160,7 +160,7 @@ namespace OrchardLite.Web.Controllers
                 dotnetVersion = dotnetVersion,
                 deploymentType = "CloudFormation Automated",
                 databaseType = isAurora ? "Aurora Serverless v2" : "RDS MySQL 8.0",
-                databaseHost = dbHost,
+                databaseHost = healthDbHost,
                 platform = "ECS Fargate",
                 timestamp = DateTime.UtcNow.ToString("o")
             };

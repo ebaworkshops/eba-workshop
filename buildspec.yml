@@ -13,16 +13,18 @@ phases:
       - TARGET_FW=$(grep -oP '(?<=<TargetFramework>)[^<]+' OrchardLiteApp/OrchardLite.Web/OrchardLite.Web.csproj)
       - echo "Detected target framework - $TARGET_FW"
 
-      # Set SDK/runtime image tags based on framework
+      # Set SDK/runtime image tags based on framework (generic: works for any
+      # netX.Y target, e.g. net3.1, net8.0, net10.0, future versions, etc.)
       - |
-        if echo "$TARGET_FW" | grep -q "net8"; then
-          export SDK_TAG="8.0"
-          export RUNTIME_TAG="8.0"
-          echo "Building as .NET 8 (transformed)"
+        VERSION=$(echo "$TARGET_FW" | grep -oP '(?<=^net)[0-9]+\.[0-9]+')
+        if [ -n "$VERSION" ]; then
+          export SDK_TAG="$VERSION"
+          export RUNTIME_TAG="$VERSION"
+          echo "Building as .NET $VERSION"
         else
           export SDK_TAG="3.1"
           export RUNTIME_TAG="3.1"
-          echo "Building as .NET Core 3.1 (legacy)"
+          echo "Could not parse target framework '$TARGET_FW' - defaulting to .NET Core 3.1 (legacy)"
         fi
 
       # Auto-fix common Transform issues (CS0136 duplicate variable declarations)

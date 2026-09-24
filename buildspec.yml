@@ -28,8 +28,10 @@ phases:
         fi
 
       # Auto-fix common Transform issues (CS0136 duplicate variable declarations)
+      # Applies to any modernized (non-legacy) target, not just net8, so future
+      # .NET versions produced by Transform are covered too.
       - |
-        if [ "$SDK_TAG" = "8.0" ]; then
+        if [ "$SDK_TAG" != "3.1" ]; then
           echo "Checking for common Transform compilation issues..."
           CONTROLLER="OrchardLiteApp/OrchardLite.Web/Controllers/HomeController.cs"
           if [ -f "$CONTROLLER" ]; then

@@ -150,7 +150,7 @@ namespace OrchardLite.Web.Controllers
             // Dynamically detect environment
             var healthDbHost = (Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost").ToLower();
             var dotnetVersion = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
-            var isTransformed = dotnetVersion.Contains(".NET 8") || dotnetVersion.Contains(".NET Core 8");
+            var isTransformed = Environment.Version.Major >= 5;
             var isAurora = healthDbHost.Contains("aurora") || healthDbHost.Contains("cluster");
             
             var health = new

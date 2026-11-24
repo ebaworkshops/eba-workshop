@@ -1,10 +1,15 @@
 @{
-    var dotnetVersion = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
-    var isModern = dotnetVersion.Contains(".NET 8");
-    var frameworkLabel = isModern ? ".NET 8.0" : ".NET Core 3.1";
+    // Detect the runtime and database dynamically (works for .NET Core 3.1, .NET 8, .NET 10, ...)
+    var runtimeVersion = Environment.Version;
+    var isModern = runtimeVersion.Major >= 5; // .NET 5+ dropped the "Core" name
+    var frameworkLabel = isModern
+        ? ".NET " + runtimeVersion.Major + "." + runtimeVersion.Minor
+        : ".NET Core " + runtimeVersion.Major + "." + runtimeVersion.Minor;
     var frameworkBadge = isModern ? "bg-success" : "bg-danger";
-    var dbLabel = isModern ? "Aurora Serverless" : "RDS MySQL 8.0";
-    var dbBadge = isModern ? "bg-success" : "bg-danger";
+    var layoutDbHost = (Environment.GetEnvironmentVariable("DB_HOST") ?? "localhost").ToLower();
+    var layoutIsAurora = layoutDbHost.Contains("aurora") || layoutDbHost.Contains("cluster");
+    var dbLabel = layoutIsAurora ? "Aurora Serverless" : "RDS MySQL 8.0";
+    var dbBadge = layoutIsAurora ? "bg-success" : "bg-danger";
 }
 <!DOCTYPE html>
 <html>

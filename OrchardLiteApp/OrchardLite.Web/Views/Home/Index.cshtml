@@ -1,7 +1,8 @@
 @model List<OrchardLite.Web.Models.ContentItem>
 @{
     ViewBag.Title = "Home";
-    var isTransformed = ViewBag.DotNetVersion.ToString().Contains(".NET 8");
+    var isTransformed = Environment.Version.Major >= 5;
+    var frameworkSummary = isTransformed ? ".NET " + Environment.Version.Major + "." + Environment.Version.Minor + " Modern Framework" : "Legacy .NET Core " + Environment.Version.Major + "." + Environment.Version.Minor;
     var isAurora = ViewBag.DatabaseType.ToString().Contains("Aurora");
     var dbHost = ViewBag.DbHost.ToString().ToLower();
     var isPrivateNetwork = dbHost.Contains("cluster") || dbHost.Contains("aurora");
@@ -91,7 +92,7 @@ else
             </div>
             <div class="card-body">
                 <ul class="list-unstyled small">
-                    <li><i class="fas @(isTransformed ? "fa-check text-success" : "fa-times text-danger")"></i> @(isTransformed ? ".NET 8.0 Modern Framework" : "Legacy .NET Core 3.1")</li>
+                    <li><i class="fas @(isTransformed ? "fa-check text-success" : "fa-times text-danger")"></i> @frameworkSummary</li>
                     <li><i class="fas @(isAurora ? "fa-check text-success" : "fa-times text-danger")"></i> @(isAurora ? "Aurora Serverless v2 (Scalable)" : "Single-instance database")</li>
                     <li><i class="fas @(isPrivateNetwork ? "fa-check text-success" : "fa-times text-danger")"></i> @(isPrivateNetwork ? "Database in private subnet" : "Database in public subnet")</li>
                     <li><i class="fas fa-times text-warning"></i> GPL-licensed components</li>
